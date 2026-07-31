@@ -67,7 +67,7 @@ new certificate so a bad hostname/trust configuration does not lock you out.
 This assumes your certbot --config-dir is set to $HOME/.letsencrypt
 
 ```sh
-git clone arkkvm-cert-updater
+git clone https://github.com/scottmckenzie/arkkvm-cert-updater.git
 cd arkkvm-cert-updater
 python3 -m venv .venv
 . .venv/bin/activate
