@@ -2,6 +2,7 @@
 set -eu
 
 . $HOME/.letsencrypt/arkkvm.env
+export ARKKVM_PASSWORD
 
 : "${ARKKVM_PASSWORD:?ARKKVM_PASSWORD is not configured}"
 : "${RENEWED_DOMAINS:?RENEWED_DOMAINS was not supplied by Certbot}"
