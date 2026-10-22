@@ -8,15 +8,17 @@ It is mainly run as a certbot deploy hook.
 - `arkkvm_update_cert.py`: all of the code; the entry point is `main()` (arkkvm_update_cert.py:289)
 - `certbot-deploy-hook.sh`: certbot hook; reads `ARKKVM_PASSWORD` from `~/.letsencrypt/arkkvm.env`
 - `pyproject.toml`: packaging (setuptools, `py-modules`) plus the `arkkvm_update_cert` command
+- `tests/`: pytest suite; WebRTC, HTTP and the device are faked (see `tests/test_update_device.py`)
 
 ## Commands
 - Dev env: `uv sync` (puts the command in `.venv/bin/`)
+- Tests: `uv run pytest --cov=arkkvm_update_cert --cov-report=term-missing`
 - Smoke check: `uv run arkkvm_update_cert --help`
 - After editing `pyproject.toml`: `uv lock && uv sync`, and commit `uv.lock`
 - End-user install: `uv tool install .` (into `~/.local/bin`)
 
 ## Gotchas
-- There is no test suite. Exercising the script for real needs an actual device, and
+- The tests never touch a real device. Exercising the script for real needs one, and
   `--reboot` or `--mode disabled` can lock you out. Never run it against a device
   unless the user asks.
 - The command name (`arkkvm_update_cert`) differs from the project name
