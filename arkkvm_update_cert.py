@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextlib
 import getpass
 import json
 import logging
@@ -14,11 +15,12 @@ import ssl
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 try:
     import aiohttp
     from aiortc import RTCSessionDescription, RTCPeerConnection
+    from aiortc.sdp import candidate_from_sdp
     from cryptography import x509
     from cryptography.hazmat.primitives import serialization
 except ImportError as exc:
@@ -144,6 +146,87 @@ async def rpc_call(
         raise ArkKVMError(f"{method} failed: {detail}")
     return response.get("result")
 
+def signaling_url(base_url: str, csrf: str | None) -> str:
+    parsed = urlsplit(base_url)
+    scheme = "ws" if parsed.scheme == "http" else "wss"
+    path = parsed.path + "/webrtc/signaling/client"
+    query = urlencode({"csrf-token": csrf}) if csrf else ""
+    return urlunsplit((scheme, parsed.netloc, path, query, ""))
+
+async def add_remote_candidate(pc: RTCPeerConnection, data: Any) -> None:
+    if not isinstance(data, dict) or not data.get("candidate"):
+        return
+    cand_str = data["candidate"].removeprefix("candidate:")
+    candidate = candidate_from_sdp(cand_str)
+    candidate.sdpMid = data.get("sdpMid")
+    candidate.sdpMLineIndex = data.get("sdpMLineIndex")
+    await pc.addIceCandidate(candidate)
+
+async def receive_signal(
+    ws: aiohttp.ClientWebSocketResponse, timeout: float
+) -> dict[str, Any] | None:
+    msg = await ws.receive(timeout=timeout)
+    if msg.type in (
+        aiohttp.WSMsgType.CLOSE,
+        aiohttp.WSMsgType.CLOSING,
+        aiohttp.WSMsgType.CLOSED,
+        aiohttp.WSMsgType.ERROR,
+    ):
+        raise ArkKVMError("device closed the signalling connection")
+    if msg.type != aiohttp.WSMsgType.TEXT or msg.data == "pong":
+        return None
+    try:
+        data = json.loads(msg.data)
+    except json.JSONDecodeError:
+        LOG.warning("ignoring malformed signalling message")
+        return None
+    if not isinstance(data, dict):
+        LOG.warning("ignoring non-dict signalling message")
+        return None
+    return data
+
+async def wait_for_signal(
+    ws: aiohttp.ClientWebSocketResponse,
+    kind: str,
+    timeout: float,
+    candidates: list[Any],
+) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + timeout
+    message = f"timed out after {timeout:g}s waiting for {kind!r} from the device"
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise ArkKVMError(message)
+        try:
+            msg = await receive_signal(ws, remaining)
+        except asyncio.TimeoutError:
+            raise ArkKVMError(message) from None
+        if msg is None:
+            continue
+        if msg.get("type") == kind:
+            return msg
+        if msg.get("type") == "new-ice-candidate":
+            candidates.append(msg.get("data"))
+
+async def relay_ice_candidates(
+    ws: aiohttp.ClientWebSocketResponse,
+    pc: RTCPeerConnection,
+    interval: float = 0.5,
+) -> None:
+    # The device only flushes its queued ICE candidates after it receives a message.
+    try:
+        await ws.send_str("ping")
+        while True:
+            try:
+                message = await receive_signal(ws, interval)
+            except asyncio.TimeoutError:
+                await ws.send_str("ping")
+                continue
+            if message and message.get("type") == "new-ice-candidate":
+                await add_remote_candidate(pc, message.get("data"))
+    except (ArkKVMError, aiohttp.ClientError, ConnectionResetError):
+        return
+
 async def update_device(args: argparse.Namespace) -> None:
     ssl_context: ssl.SSLContext | bool
     if args.insecure:
@@ -184,69 +267,94 @@ async def update_device(args: argparse.Namespace) -> None:
             connector=connector, cookie_jar=cookie_jar, timeout=timeout, headers=headers
         ) as session:
             csrf = await login(session, args.device, args.password)
-            offer = await pc.createOffer()
-            await pc.setLocalDescription(offer)
-            await wait_for_ice_gathering(pc, args.timeout)
-            local = pc.localDescription
-            if local is None:
-                raise ArkKVMError("WebRTC did not produce a local offer")
-            encoded_offer = base64.b64encode(
-                json.dumps({"sdp": local.sdp, "type": local.type}).encode()
-            ).decode()
-            request_headers = {"X-CSRF-Token": csrf} if csrf else {}
-            async with session.post(
-                args.device + "/webrtc/session",
-                json={"sd": encoded_offer},
-                headers=request_headers,
-            ) as response:
-                body = await checked_json(response)
+            # Closing this socket closes the device's WebRTC session, so it stays open
+            # for the whole update.
+            async with session.ws_connect(
+                signaling_url(args.device, csrf), headers={"Origin": args.device}
+            ) as ws:
+                candidates: list[Any] = []
+                await wait_for_signal(ws, "device-metadata", args.timeout, candidates)
 
-            try:
-                answer_data = json.loads(base64.b64decode(body["sd"], validate=True))
-                answer = RTCSessionDescription(
-                    sdp=answer_data["sdp"], type=answer_data["type"]
-                )
-            except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
-                raise ArkKVMError("device returned an invalid WebRTC answer") from exc
-            await pc.setRemoteDescription(answer)
-            await asyncio.wait_for(opened.wait(), args.timeout)
+                offer = await pc.createOffer()
+                await pc.setLocalDescription(offer)
+                await wait_for_ice_gathering(pc, args.timeout)
+                local = pc.localDescription
+                if local is None:
+                    raise ArkKVMError("WebRTC did not produce a local offer")
+                encoded_offer = base64.b64encode(
+                    json.dumps({"sdp": local.sdp, "type": local.type}).encode()
+                ).decode()
 
-            if args.mode == "custom":
-                certificate, private_key = load_custom_material(args.cert, args.key)
-                state = {
-                    "mode": "custom",
-                    "certificate": certificate,
-                    "privateKey": private_key,
-                }
-            else:
-                state = {"mode": args.mode}
-
-            await rpc_call(
-                channel, pending, "setTLSState", {"state": state}, 1, args.timeout
-            )
-            current = await rpc_call(
-                channel, pending, "getTLSState", None, 2, args.timeout
-            )
-            if not isinstance(current, dict) or current.get("mode") != args.mode:
-                raise ArkKVMError(f"verification failed; device returned TLS state {current!r}")
-            print(f"TLS mode successfully updated to {args.mode!r}.")
-
-            if args.reboot:
-                print("Rebooting ArkKVM to activate the new listener configuration...")
+                await ws.send_json({"type": "offer", "data": {"sd": encoded_offer}})
+                reply = await wait_for_signal(ws, "answer", args.timeout, candidates)
                 try:
-                    await rpc_call(
-                        channel,
-                        pending,
-                        "reboot",
-                        {"force": True},
-                        3,
-                        min(args.timeout, 5),
+                    answer_data = json.loads(
+                        base64.b64decode(reply["data"], validate=True)
                     )
-                except (ArkKVMError, asyncio.TimeoutError):
-                    # A reboot may tear down the channel before its response arrives.
-                    pass
-            else:
-                print("Reboot the ArkKVM to activate the new TLS configuration.")
+                    answer = RTCSessionDescription(
+                        sdp=answer_data["sdp"], type=answer_data["type"]
+                    )
+                except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                    raise ArkKVMError("device returned an invalid WebRTC answer") from exc
+                await pc.setRemoteDescription(answer)
+
+                for data in candidates:
+                    await add_remote_candidate(pc, data)
+
+                relay = asyncio.create_task(relay_ice_candidates(ws, pc))
+                try:
+                    try:
+                        await asyncio.wait_for(opened.wait(), args.timeout)
+                    except asyncio.TimeoutError:
+                        raise ArkKVMError(
+                            f"timed out after {args.timeout:g}s waiting for the "
+                            "WebRTC data channel to open"
+                        ) from None
+
+                    if args.mode == "custom":
+                        certificate, private_key = load_custom_material(args.cert, args.key)
+                        state = {
+                            "mode": "custom",
+                            "certificate": certificate,
+                            "privateKey": private_key,
+                        }
+                    else:
+                        state = {"mode": args.mode}
+
+                    await rpc_call(
+                        channel, pending, "setTLSState", {"state": state}, 1, args.timeout
+                    )
+                    current = await rpc_call(
+                        channel, pending, "getTLSState", None, 2, args.timeout
+                    )
+                    if not isinstance(current, dict) or current.get("mode") != args.mode:
+                        raise ArkKVMError(
+                            f"verification failed; device returned TLS state {current!r}"
+                        )
+                    print(f"TLS mode successfully updated to {args.mode!r}.")
+
+                    if args.reboot:
+                        print(
+                            "Rebooting ArkKVM to activate the new listener configuration..."
+                        )
+                        try:
+                            await rpc_call(
+                                channel,
+                                pending,
+                                "reboot",
+                                {"force": True},
+                                3,
+                                min(args.timeout, 5),
+                            )
+                        except (ArkKVMError, asyncio.TimeoutError):
+                            # A reboot may tear down the channel before its response arrives.
+                            pass
+                    else:
+                        print("Reboot the ArkKVM to activate the new TLS configuration.")
+                finally:
+                    relay.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await relay
     finally:
         await pc.close()
 
@@ -310,7 +418,7 @@ def main() -> int:
     try:
         asyncio.run(update_device(args))
     except (ArkKVMError, asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {str(exc) or type(exc).__name__}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("Cancelled.", file=sys.stderr)
