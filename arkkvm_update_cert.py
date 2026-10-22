@@ -24,7 +24,7 @@ try:
 except ImportError as exc:
     print(
         "Missing dependency. Install with:\n"
-        "  python3 -m pip install -r requirements.txt",
+        "  uv tool install .",
         file=sys.stderr,
     )
     raise SystemExit(2) from exc

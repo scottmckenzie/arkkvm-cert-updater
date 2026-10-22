@@ -6,18 +6,30 @@ it authenticates locally, establishes a WebRTC session, and sends
 
 ## Install
 
-Python 3.10 or newer is recommended.
+Requires [uv](https://docs.astral.sh/uv/). Python 3.14 or newer is required;
+uv will download a suitable interpreter if needed.
+
+Clone the repository and install the command with:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r requirements.txt
+uv tool install .
+```
+
+This places the `arkkvm_update_cert` executable in uv's tool bin directory
+(typically `~/.local/bin`). If that directory is not already on your `PATH`,
+run `uv tool update-shell` to add it.
+
+After pulling updates from the repository, reinstall the tool to get the latest
+version:
+
+```sh
+uv tool install --reinstall .
 ```
 
 ## Apply a custom certificate
 
 ```sh
-python3 arkkvm_update_cert.py http://arkkvm.local \
+arkkvm_update_cert http://arkkvm.local \
   --cert fullchain.pem \
   --key privkey.pem \
   --reboot
@@ -28,7 +40,7 @@ the `ARKKVM_PASSWORD` environment variable:
 
 ```sh
 export ARKKVM_PASSWORD='your-device-password'
-python3 arkkvm_update_cert.py http://arkkvm.local \
+arkkvm_update_cert http://arkkvm.local \
   --cert fullchain.pem \
   --key privkey.pem \
   --reboot
@@ -41,7 +53,7 @@ the script displays the hidden prompt.
 If the device is currently using an untrusted/self-signed HTTPS certificate:
 
 ```sh
-python3 arkkvm_update_cert.py https://arkkvm.local \
+arkkvm_update_cert https://arkkvm.local \
   --cert fullchain.pem \
   --key privkey.pem \
   --insecure \
@@ -54,8 +66,8 @@ available. If local authentication is disabled, use `--no-password`.
 ## Other TLS modes
 
 ```sh
-python3 arkkvm_update_cert.py http://arkkvm.local --mode self-signed --reboot
-python3 arkkvm_update_cert.py https://arkkvm.local --mode disabled --insecure --reboot
+arkkvm_update_cert http://arkkvm.local --mode self-signed --reboot
+arkkvm_update_cert https://arkkvm.local --mode disabled --insecure --reboot
 ```
 
 Without `--reboot`, the script persists and verifies the setting but leaves the
@@ -69,8 +81,6 @@ This assumes your certbot --config-dir is set to $HOME/.letsencrypt
 ```sh
 git clone https://github.com/scottmckenzie/arkkvm-cert-updater.git
 cd arkkvm-cert-updater
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r requirements.txt
+uv tool install .
 certbot certonly --config-dir $HOME/.letsencrypt --deploy-hook $PWD/certbot-deploy-hook.sh -d arkkvm.example.com
 ```
