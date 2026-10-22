@@ -84,3 +84,18 @@ cd arkkvm-cert-updater
 uv tool install .
 certbot certonly --config-dir $HOME/.letsencrypt --deploy-hook $PWD/certbot-deploy-hook.sh -d arkkvm.example.com
 ```
+
+### Daily renewal with cron
+
+Run `crontab -e` and add this line to renew once a day. Certbot stores the
+deploy hook in the renewal config, so renewals rerun it. Cron runs with a
+minimal `PATH`, so certbot is called by absolute path; change it if
+`command -v certbot` prints something other than `/usr/bin/certbot`.
+
+```
+# Renew Let's Encrypt certificates once a day at 03:17
+17 3 * * * /usr/bin/certbot renew --quiet --config-dir $HOME/.letsencrypt --work-dir $HOME/.letsencrypt/work --logs-dir $HOME/.letsencrypt/logs
+```
+
+Pick a different minute from 17 if you like; avoid minute 0 so the request
+doesn't land at the same moment as everyone else's.
