@@ -135,7 +135,11 @@ def _parse_url(value: str) -> tuple[str, str, int]:
         raise ConfigError("ARKKVM_URL has no host name")
     if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username or parts.password:
         raise ConfigError("ARKKVM_URL must be just https://host[:port], without a path or credentials")
-    return f"https://{parts.netloc}", host, port or 443
+    if port == 0:
+        raise ConfigError("ARKKVM_URL has an invalid port 0")
+    shown_host = f"[{host}]" if ":" in host else host
+    netloc = shown_host if port in (None, 443) else f"{shown_host}:{port}"
+    return f"https://{netloc}", host, port or 443
 
 
 def _parse_fingerprint(value: str) -> bytes:

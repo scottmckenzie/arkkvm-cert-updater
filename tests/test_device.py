@@ -691,3 +691,14 @@ def test_refusal_does_not_leak_key_material(device):
         install()
     assert "TOPSECRETKEY" not in str(excinfo.value)
     assert "self-signed" in str(excinfo.value)
+
+
+def test_network_error_message_strips_url_query():
+    with pytest.raises(m.ProtocolError) as exc, m._network_errors():
+        raise aiohttp.ClientError("bad handshake wss://dev/webrtc/signaling/client?csrf-token=SECRET123 failed")
+    assert "SECRET123" not in str(exc.value)
+    assert "wss://dev/webrtc/signaling/client" in str(exc.value)
+
+
+def test_device_logger_is_package_child():
+    assert m.LOG.name == "arkkvm_cert_updater.device"

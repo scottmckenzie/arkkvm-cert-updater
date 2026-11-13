@@ -72,8 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(levelname)s: %(message)s", stream=sys.stderr)
     log.setLevel(logging.DEBUG if verbose else logging.INFO)
-    # Debug output from the HTTP stack is noisy and must never be switched on by -v or the root level.
-    for name in ("urllib3", "requests"):
+    # The WebRTC stack logs local/device IP addresses at INFO; keep them out of certbot output and cron logs.
+    for name in ("aioice", "aiortc"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
 

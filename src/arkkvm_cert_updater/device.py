@@ -7,6 +7,7 @@ import base64
 import contextlib
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Iterator
 from importlib.metadata import version
 from typing import Any
@@ -18,7 +19,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .tls import Trust, aiohttp_ssl
 
-LOG = logging.getLogger("arkkvm-cert-updater")
+LOG = logging.getLogger(__name__)
 
 
 class DeviceError(Exception):
@@ -41,6 +42,11 @@ class RpcError(ProtocolError):
     """The KVM answered an RPC call with a JSON-RPC error."""
 
 
+def _strip_queries(text: str) -> str:
+    """Drop ``?query`` parts of URLs: the signalling URL carries the CSRF token."""
+    return re.sub(r"(https?|wss?)://[^\s'\"]*", lambda m: m.group(0).split("?", 1)[0], text)
+
+
 @contextlib.contextmanager
 def _network_errors() -> Iterator[None]:
     """Report transport failures as ``ProtocolError``; typed device errors pass through."""
@@ -49,7 +55,8 @@ def _network_errors() -> Iterator[None]:
     except DeviceError:
         raise
     except (aiohttp.ClientError, OSError, TimeoutError) as exc:
-        raise ProtocolError(f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__) from exc
+        text = _strip_queries(str(exc))
+        raise ProtocolError(f"{type(exc).__name__}: {text}" if text else type(exc).__name__) from exc
 
 
 async def wait_for_ice_gathering(pc: RTCPeerConnection, timeout: float) -> None:

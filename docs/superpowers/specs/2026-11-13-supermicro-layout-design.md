@@ -78,7 +78,7 @@ The device protocol (local login → WebRTC signalling over a websocket → `set
 | `ARKKVM_PASSWORD` | yes | Device password. May be `pass://vault/item/field`; an unresolved `pass://` value is a config error that never echoes the value. No command-line option. |
 | `ARKKVM_CERT_NAME` | yes | certbot certificate name; the hook and updater skip any other lineage. |
 | `ARKKVM_TLS_FINGERPRINT` | no | SHA-256 of the device's current (self-signed) certificate, trusted for the first install only. |
-| `ARKKVM_CA_BUNDLE` | no | Extra CA file for verifying the device (default: system CAs). |
+| `ARKKVM_CA_BUNDLE` | no | CA file used instead of the system CAs to verify the device (default: system CAs). |
 | `ARKKVM_RESET_TIMEOUT` | no | Seconds to wait after the reboot for the new certificate to be served (default 300). |
 | `ARKKVM_TIMEOUT` | no | Per-step timeout in seconds for HTTP, signalling, ICE and RPC (default 20, as today). |
 | `ARKKVM_LETSENCRYPT_LIVE` | no | certbot live dir (default `$HOME/.config/letsencrypt/live`; absolute path). |
@@ -91,7 +91,7 @@ supermicro's `config.py`, with `ENV_FILE_VAR = "ARKKVM_CERT_UPDATER_ENV"`.
 
 Same two modes as supermicro's `tls.py`, decided before any credentials are sent:
 
-- **Verified**: normal verification against system CAs (or `ARKKVM_CA_BUNDLE`), with the lineage's
+- **Verified**: normal verification against system CAs (or, instead of them, `ARKKVM_CA_BUNDLE`), with the lineage's
   `chain.pem` offered for chain building, and hostname checking.
 - **Pinned**: if verification fails and `ARKKVM_TLS_FINGERPRINT` is set, the served leaf must match it
   exactly. If neither holds, exit with the identity error and send nothing.

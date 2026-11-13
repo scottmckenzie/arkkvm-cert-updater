@@ -18,7 +18,7 @@ The web API is undocumented and may change between firmware versions. Errors inc
 
 The password and session cookie are only sent to a server whose identity has been checked. TLS verification is never turned off, and redirects from the device are never followed (a redirect is reported as an error), so the password, key and session never go to another address. Each connection that carries credentials is either:
 
-- **Verified normally**: system CAs (or `ARKKVM_CA_BUNDLE`), with host name checking against `ARKKVM_URL`. The intermediates in the lineage's `chain.pem` are also offered when building the chain, because many device web servers send only the leaf certificate. The chain must still end at a trusted root.
+- **Verified normally**: system CAs (or, instead of them, `ARKKVM_CA_BUNDLE`), with host name checking against `ARKKVM_URL`. The intermediates in the lineage's `chain.pem` are also offered when building the chain, because many device web servers send only the leaf certificate. The chain must still end at a trusted root.
 - **Pinned**: if normal verification fails and `ARKKVM_TLS_FINGERPRINT` is set, the server is accepted only if its certificate has exactly that SHA-256 fingerprint. This is for the first install, while the device still has its self-signed certificate. The pin is checked on every such connection, for the login request and the signalling websocket alike.
 
 If neither passes, the tool stops before sending anything (exit 4). The password has no command-line option: it only comes from the env file or the environment.
@@ -57,7 +57,7 @@ The tool warns if the group or others have any access to the file (mode `go+rwx`
 | `ARKKVM_PASSWORD` | device password, normally a `pass://` reference | required |
 | `ARKKVM_CERT_NAME` | certbot certificate name; other lineages are skipped | required |
 | `ARKKVM_TLS_FINGERPRINT` | SHA-256 pin for the first install | unset |
-| `ARKKVM_CA_BUNDLE` | extra CA file for verification | system CAs |
+| `ARKKVM_CA_BUNDLE` | CA file used instead of the system CAs | system CAs |
 | `ARKKVM_RESET_TIMEOUT` | seconds to wait after the reboot | 300 |
 | `ARKKVM_TIMEOUT` | per-step timeout in seconds for HTTP, signalling, ICE and RPC | 20 |
 | `ARKKVM_LETSENCRYPT_LIVE` | certbot `live` folder, for `--reapply` | `~/.config/letsencrypt/live` |
@@ -210,6 +210,8 @@ On each run, the hook logs in with the token, runs the updater under `pass-cli r
 ## Things only a real run will tell
 
 - The exit-5 mapping (401/403 from the local login) is assumed and gets confirmed by the first real run.
+- Whether the KVM's HTTPS listener serves the full chain correctly after the reboot is assumed, not confirmed.
+- Whether `ARKKVM_RESET_TIMEOUT` (300 s) is always enough for the device to come back with the new certificate is unconfirmed.
 - The device's web API is undocumented and may change between firmware versions, so errors include an excerpt of the response, never the password or cookies.
 
 ## Development
@@ -224,4 +226,4 @@ uvx --from shellcheck-py==0.11.0.1 shellcheck certbot/*.sh
 uv run arkkvm-cert-updater --help
 ```
 
-Tests use local fakes only (no real device). They pass as root and as a normal user.
+Tests use local fakes only (no real device).

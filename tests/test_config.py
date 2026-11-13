@@ -223,3 +223,23 @@ def test_unresolved_pass_reference_not_echoed():
     with pytest.raises(ConfigError) as exc:
         resolve_config({**BASE, "ARKKVM_PASSWORD": "pass://Vault/Item/password"})
     assert "Vault" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://KVM.Example.COM", "https://kvm.example.com"),
+        ("https://kvm:443", "https://kvm"),
+        ("https://kvm:", "https://kvm"),
+        ("https://[FD00::1]", "https://[fd00::1]"),
+        ("https://[fd00::1]:443/", "https://[fd00::1]"),
+        ("https://kvm:8443", "https://kvm:8443"),
+    ],
+)
+def test_url_normalised_from_host_and_port(raw, expected):
+    assert resolve_config({**BASE, "ARKKVM_URL": raw}).url == expected
+
+
+def test_url_port_zero_rejected():
+    with pytest.raises(ConfigError, match="ARKKVM_URL"):
+        resolve_config({**BASE, "ARKKVM_URL": "https://kvm:0"})

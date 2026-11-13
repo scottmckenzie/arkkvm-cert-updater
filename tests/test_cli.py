@@ -153,13 +153,13 @@ def test_force_passes_force(env, calls):
     assert calls["run"] == [{"force": True, "check_only": False, "deps": None}]
 
 
-def test_verbose_does_not_enable_urllib3_debug(env, calls):
+def test_verbose_does_not_enable_webrtc_logging(env, calls):
     pkg = logging.getLogger("arkkvm_cert_updater")
     old = pkg.level
     try:
         assert cli.main(["-v"], env) == 0
         assert pkg.level == logging.DEBUG
-        for name in ("urllib3", "requests"):
+        for name in ("aioice", "aiortc"):
             assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING
     finally:
         pkg.setLevel(old)
