@@ -170,7 +170,7 @@ def test_rpc_call_error_with_message():
 def test_rpc_call_timeout():
     pending = {}
     channel = FakeChannel(pending, None)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(m.ProtocolError, match="waiting for the getTLSState reply"):
         asyncio.run(m.rpc_call(channel, pending, "getTLSState", None, 1, 0.01))
     assert pending == {}
 
@@ -291,6 +291,8 @@ def device(monkeypatch):
             self.send_metadata = True
             self.login_status = 200
             self.login_exc = None
+            self.remote_exc = None
+            self.candidates_first = False
 
     dev = Device()
 
@@ -377,6 +379,8 @@ def device(monkeypatch):
                 self.localDescription = desc
 
         async def setRemoteDescription(self, desc):
+            if self.device.remote_exc is not None:
+                raise self.device.remote_exc
             self.device.remote = desc
             if self.device.open_channel:
                 self.channel.handlers["open"]()
@@ -415,10 +419,14 @@ def device(monkeypatch):
                 await self.queue.put(aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, "pong", None))
                 await self.queue.put(aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, "not json", None))
                 answer = json.dumps({"type": "answer", "data": self.device.answer_sd})
-                await self.queue.put(aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, answer, None))
+                answer_msg = aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, answer, None)
+                if not self.device.candidates_first:
+                    await self.queue.put(answer_msg)
                 for c in self.device.candidates:
                     cand = json.dumps({"type": "new-ice-candidate", "data": c})
                     await self.queue.put(aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, cand, None))
+                if self.device.candidates_first:
+                    await self.queue.put(answer_msg)
 
         async def send_str(self, data):
             self.sent_str.append(data)
@@ -591,3 +599,95 @@ def test_metadata_timeout(device):
     with pytest.raises(m.ProtocolError, match="waiting for 'device-metadata'"):
         install(timeout=0.05)
     assert device.closed
+
+
+def test_rpc_call_non_dict_error():
+    pending = {}
+    channel = FakeChannel(pending, {"id": 1, "error": "boom"})
+    with pytest.raises(m.ProtocolError, match="failed: boom"):
+        asyncio.run(m.rpc_call(channel, pending, "reboot", None, 1, 1))
+
+
+def test_malformed_candidate_is_protocol_error():
+    from aiortc.sdp import candidate_from_sdp
+
+    class Pc:
+        async def addIceCandidate(self, candidate):
+            raise AssertionError("not reached")
+
+    original = m.candidate_from_sdp
+    m.candidate_from_sdp = candidate_from_sdp
+    try:
+        for bad in ("garbage", "1 1 udp notanumber 10.0.0.2 5000 typ host"):
+            with pytest.raises(m.ProtocolError, match="malformed ICE candidate"):
+                asyncio.run(m.add_remote_candidate(Pc(), {"candidate": bad}))
+    finally:
+        m.candidate_from_sdp = original
+
+
+def test_buffered_malformed_candidate_is_protocol_error(device, monkeypatch):
+    from aiortc.sdp import candidate_from_sdp
+
+    monkeypatch.setattr(m, "candidate_from_sdp", candidate_from_sdp)
+    device.candidates = [{"candidate": "candidate:garbage"}]
+    device.candidates_first = True  # buffered while waiting for the answer
+    with pytest.raises(m.ProtocolError, match="malformed ICE candidate"):
+        install()
+    assert device.closed
+
+
+def test_relay_survives_malformed_candidate(monkeypatch):
+    from aiortc.sdp import candidate_from_sdp
+
+    monkeypatch.setattr(m, "candidate_from_sdp", candidate_from_sdp)
+
+    async def run():
+        pc = types.SimpleNamespace(added=[])
+
+        async def add(candidate):
+            pc.added.append(candidate)
+
+        pc.addIceCandidate = add
+
+        class WS:
+            def __init__(self):
+                self.msgs = [
+                    {"type": "new-ice-candidate", "data": {"candidate": "garbage"}},
+                    {"type": "new-ice-candidate", "data": {"candidate": "1 1 udp 1 10.0.0.2 5000 typ host"}},
+                ]
+                self.sent_str = []
+
+            async def send_str(self, data):
+                self.sent_str.append(data)
+
+            async def receive(self, timeout=None):
+                if not self.msgs:
+                    return aiohttp.WSMessage(aiohttp.WSMsgType.CLOSED, None, None)
+                return aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, json.dumps(self.msgs.pop(0)), None)
+
+        await m.relay_ice_candidates(WS(), pc, interval=0.01)
+        assert len(pc.added) == 1
+
+    asyncio.run(run())
+
+
+def test_bad_answer_sdp_is_protocol_error(device):
+    device.remote_exc = ValueError("bad sdp")
+    with pytest.raises(m.ProtocolError, match="invalid WebRTC answer"):
+        install()
+    assert device.closed
+
+
+def test_rpc_timeout_in_flow_is_protocol_error(device):
+    device.replies["getTLSState"] = None
+    with pytest.raises(m.ProtocolError, match="waiting for the getTLSState reply"):
+        install(timeout=0.05)
+    assert device.closed
+
+
+def test_refusal_does_not_leak_key_material(device):
+    device.replies["getTLSState"]["result"] = {"mode": "self-signed", "privateKey": "TOPSECRETKEY", "certificate": "C"}
+    with pytest.raises(m.RefusedError) as excinfo:
+        install()
+    assert "TOPSECRETKEY" not in str(excinfo.value)
+    assert "self-signed" in str(excinfo.value)

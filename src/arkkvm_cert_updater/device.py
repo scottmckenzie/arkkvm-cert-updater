@@ -116,11 +116,13 @@ async def rpc_call(
     channel.send(json.dumps(message))
     try:
         response = await asyncio.wait_for(future, timeout)
+    except TimeoutError:
+        raise ProtocolError(f"timed out after {timeout:g}s waiting for the {method} reply") from None
     finally:
         pending.pop(request_id, None)
     if "error" in response:
         error = response["error"]
-        detail = error.get("data") or error.get("message") or error
+        detail = (error.get("data") or error.get("message") or error) if isinstance(error, dict) else error
         raise RpcError(f"{method} failed: {detail}")
     return response.get("result")
 
@@ -134,11 +136,13 @@ def signaling_url(base_url: str, csrf: str) -> str:
 async def add_remote_candidate(pc: RTCPeerConnection, data: Any) -> None:
     if not isinstance(data, dict) or not data.get("candidate"):
         return
-    cand_str = data["candidate"].removeprefix("candidate:")
-    candidate = candidate_from_sdp(cand_str)
-    candidate.sdpMid = data.get("sdpMid")
-    candidate.sdpMLineIndex = data.get("sdpMLineIndex")
-    await pc.addIceCandidate(candidate)
+    try:
+        candidate = candidate_from_sdp(str(data["candidate"]).removeprefix("candidate:"))
+        candidate.sdpMid = data.get("sdpMid")
+        candidate.sdpMLineIndex = data.get("sdpMLineIndex")
+        await pc.addIceCandidate(candidate)
+    except (AssertionError, ValueError, TypeError, AttributeError) as exc:
+        raise ProtocolError(f"device sent a malformed ICE candidate: {exc or type(exc).__name__}") from exc
 
 
 async def receive_signal(ws: aiohttp.ClientWebSocketResponse, timeout: float) -> dict[str, Any] | None:
@@ -202,7 +206,10 @@ async def relay_ice_candidates(
                 await ws.send_str("ping")
                 continue
             if message and message.get("type") == "new-ice-candidate":
-                await add_remote_candidate(pc, message.get("data"))
+                try:
+                    await add_remote_candidate(pc, message.get("data"))
+                except ProtocolError as exc:
+                    LOG.warning("ignoring ICE candidate: %s", exc)
     except (ProtocolError, aiohttp.ClientError, ConnectionResetError):
         return
 
@@ -288,9 +295,9 @@ async def _install(
         try:
             answer_data = json.loads(base64.b64decode(reply["data"], validate=True))
             answer = RTCSessionDescription(sdp=answer_data["sdp"], type=answer_data["type"])
-        except (KeyError, ValueError, TypeError) as exc:
+            await pc.setRemoteDescription(answer)
+        except (KeyError, ValueError, TypeError, AssertionError, AttributeError) as exc:
             raise ProtocolError("device returned an invalid WebRTC answer") from exc
-        await pc.setRemoteDescription(answer)
 
         for data in candidates:
             await add_remote_candidate(pc, data)
@@ -311,7 +318,9 @@ async def _install(
                 raise RefusedError(str(exc)) from exc
             current = await rpc_call(channel, pending, "getTLSState", None, 2, timeout)
             if not isinstance(current, dict) or current.get("mode") != "custom":
-                raise RefusedError(f"verification failed; device returned TLS state {current!r}")
+                # Report only the mode: the reply might echo the certificate or private key.
+                mode = current.get("mode") if isinstance(current, dict) else type(current).__name__
+                raise RefusedError(f"verification failed; the device reports TLS mode {mode!r}, not 'custom'")
             LOG.info("TLS state saved; rebooting the KVM to activate it")
 
             # A reboot may tear down the channel before its response arrives.
