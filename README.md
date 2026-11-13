@@ -6,7 +6,7 @@ Only the ArkKVM's local web UI is supported. The device speaks its own web API: 
 
 ## How it works
 
-1. Loads the certbot lineage (`fullchain.pem`, `privkey.pem`, `chain.pem`) and checks that the key matches the certificate.
+1. Loads the certbot lineage (`fullchain.pem`, `privkey.pem`, `chain.pem`) and checks that the key matches the certificate. Before contacting the device (even with `--check`), it also checks that the certificate is currently valid and covers the host name or IP address in `ARKKVM_URL` (exit 3 if not), so a certificate that could never verify is not installed and the device is not rebooted for nothing.
 2. Fetches the certificate the device is serving now (TLS handshake, no login) and chooses trust (verified normally, or pinned by `ARKKVM_TLS_FINGERPRINT`). If the served certificate equals the lineage's leaf and verifies normally, it logs "already installed" and exits 0 without logging in, unless `--force`. With `--check`, it logs in to confirm the password works, compares, and changes nothing.
 3. Logs in with the local password, opens the WebRTC session, sets the TLS state to custom with the certificate and key, and confirms the device reports mode custom.
 4. Reboots the device (a dropped connection during the reboot is expected).
@@ -18,7 +18,7 @@ The web API is undocumented and may change between firmware versions. Errors inc
 
 The password and session cookie are only sent to a server whose identity has been checked. TLS verification is never turned off, and redirects from the device are never followed (a redirect is reported as an error), so the password, key and session never go to another address. Each connection that carries credentials is either:
 
-- **Verified normally**: system CAs (or, instead of them, `ARKKVM_CA_BUNDLE`), with host name checking against `ARKKVM_URL`. The intermediates in the lineage's `chain.pem` are also offered when building the chain, because many device web servers send only the leaf certificate. The chain must still end at a trusted root.
+- **Verified normally**: system CAs (or, instead of them, `ARKKVM_CA_BUNDLE`), with host name checking against `ARKKVM_URL`. The intermediates in the lineage's `chain.pem` are also offered when building the chain, because many device web servers send only the leaf certificate. Before an install, the intermediates from every earlier `chainN.pem` certbot kept in `archive/<name>/` are offered too: Let's Encrypt rotates its intermediates, so the certificate still on the device may need a different one than the renewal. They only help build a chain; it must still end at a trusted root.
 - **Pinned**: if normal verification fails and `ARKKVM_TLS_FINGERPRINT` is set, the server is accepted only if its certificate has exactly that SHA-256 fingerprint. This is for the first install, while the device still has its self-signed certificate. The pin is checked on every such connection, for the login request and the signalling websocket alike.
 
 If neither passes, the tool stops before sending anything (exit 4). The password has no command-line option: it only comes from the env file or the environment.

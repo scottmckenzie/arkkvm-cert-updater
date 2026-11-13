@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from . import device, tls
-from .certs import Lineage, format_fingerprint, sha256_fingerprint
+from .certs import Lineage, check_usable_for, format_fingerprint, sha256_fingerprint
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ class Deps:
     check_login: Callable[..., None] = field(default=lambda *a, **k: asyncio.run(device.check_login(*a, **k)))
     install: Callable[..., None] = field(default=lambda *a, **k: asyncio.run(device.install_certificate(*a, **k)))
     wait: Callable[..., None] = field(default=wait_for_certificate)
+    check_usable: Callable[[Lineage, str], None] = field(default=check_usable_for)
 
 
 def _served_matches(config: Config, lineage: Lineage, check_context: ssl.SSLContext, deps: Deps) -> tuple[bool, str]:
@@ -133,6 +134,9 @@ def run(
 ) -> Outcome:
     """Install ``lineage`` on the KVM unless it's already there; or, with ``check_only``, just check."""
     deps = deps or Deps()
+    # Before touching the KVM, even for --check: a certificate that can't verify for this host would reboot
+    # the KVM into a certificate nothing trusts.
+    deps.check_usable(lineage, config.host)
     check_context = tls.verification_context(lineage.chain_pem, config.ca_bundle)
 
     served_matches: tuple[bool, str] | None = None
@@ -142,11 +146,13 @@ def run(
             log.info("already installed: the KVM serves %s", served_matches[1])
             return Outcome.ALREADY_INSTALLED
 
-    # A separate context for the device session: it may change a context it is given.
+    # A separate context for the device session: it may change a context it is given. The KVM still serves
+    # the old certificate here, which may have been issued under an earlier intermediate than the new
+    # lineage's, so offer every intermediate certbot has kept (as intermediates only: roots stay the CAs).
     trust = deps.choose_trust(
         config.host,
         config.port,
-        context=tls.verification_context(lineage.chain_pem, config.ca_bundle),
+        context=tls.verification_context(lineage.issuer_chains_pem or lineage.chain_pem, config.ca_bundle),
         pin=config.tls_fingerprint,
         timeout=PROBE_TIMEOUT,
     )

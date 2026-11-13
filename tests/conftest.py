@@ -69,6 +69,10 @@ def _ca_cert(subject, issuer, public_key, signing_key, path_length):
     return builder.sign(signing_key, hashes.SHA256())
 
 
+def _cn(cert: x509.Certificate) -> str:
+    return str(cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value)
+
+
 def pem(cert: x509.Certificate) -> bytes:
     return cert.public_bytes(serialization.Encoding.PEM)
 
@@ -112,7 +116,7 @@ class Pki:
         """Issue a fresh leaf (new key every call) signed by the intermediate: (cert_pem, key_pem)."""
         key = make_key(key_type)
         cert = (
-            _builder(name, "Test Intermediate CA", key.public_key())
+            _builder(name, _cn(self.intermediate_cert), key.public_key())
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
             .add_extension(
                 x509.KeyUsage(
@@ -198,3 +202,27 @@ def make_lineage(tmp_path: Path, pki: Pki) -> Callable[..., Path]:
 def lineage_dir(make_lineage: Callable[..., Path], request: pytest.FixtureRequest) -> Path:
     """A certbot-style live/<name> folder. Parametrize indirectly to pick the key type."""
     return make_lineage(key_type=getattr(request, "param", "rsa2048"))
+
+
+def second_intermediate(pki: Pki, cn: str = "Test Intermediate CA B") -> Pki:
+    """The same root with another intermediate, like Let's Encrypt issuing from R11 after R10."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    inter = _ca_cert(cn, "Test Root CA", key.public_key(), pki.root_key, path_length=0)
+    return Pki(pki.root_key, pki.root_cert, key, inter)
+
+
+def certbot_lineage(base: Path, name: str, issues: list[tuple[bytes, bytes, bytes]]) -> Path:
+    """certbot's layout: archive/<name>/{cert,chain,fullchain,privkey}N.pem for each (cert, key, chain) issue,
+    and live/<name>/*.pem symlinks to the newest."""
+    archive = base / "archive" / name
+    live = base / "live" / name
+    archive.mkdir(parents=True)
+    live.mkdir(parents=True)
+    for n, (cert, key, chain) in enumerate(issues, start=1):
+        (archive / f"cert{n}.pem").write_bytes(cert)
+        (archive / f"chain{n}.pem").write_bytes(chain)
+        (archive / f"fullchain{n}.pem").write_bytes(cert + chain)
+        (archive / f"privkey{n}.pem").write_bytes(key)
+    for kind in ("cert", "chain", "fullchain", "privkey"):
+        (live / f"{kind}.pem").symlink_to(archive / f"{kind}{len(issues)}.pem")
+    return live

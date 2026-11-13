@@ -100,7 +100,11 @@ class Harness:
             check_login=self.check_login,
             install=self.install,
             wait=self.wait,
+            check_usable=self.check_usable,
         )
+
+    def check_usable(self, lineage: Lineage, host: str) -> None:
+        self.usable_checked = (lineage.name, host)
 
 
 # --- run ----------------------------------------------------------------------------------------
@@ -368,3 +372,39 @@ def test_wait_probe_timeout_is_bounded():
     with pytest.raises(VerifyError):
         _wait(clock, fetch, timeout=25.0)
     assert all(0 < t <= 10.0 for t in timeouts)
+
+
+def test_choose_trust_gets_archived_issuer_chains_but_wait_uses_the_new_chain(pki):
+    """The served (old) certificate may need an earlier intermediate; the new one must verify with its own chain."""
+    import dataclasses
+
+    from conftest import second_intermediate
+
+    pki_b = second_intermediate(pki)
+    lineage = dataclasses.replace(
+        LINEAGE, chain_pem=pki_b.intermediate_pem, issuer_chains_pem=pki.intermediate_pem + pki_b.intermediate_pem
+    )
+    h = Harness()
+    seen: dict[str, ssl.SSLContext] = {}
+
+    def choose_trust(host, port, *, context, pin, timeout):
+        seen["trust"] = context
+        return Trust(context, None)
+
+    deps = h.deps()
+    deps.choose_trust = choose_trust
+    run(make_config(), lineage, deps=deps)
+
+    def intermediates(context: ssl.SSLContext) -> set[str]:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        names = {
+            str(x509.load_der_x509_certificate(der).subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value)
+            for der in context.get_ca_certs(binary_form=True)
+        }
+        return {n for n in names if n.startswith("Test Intermediate CA")}
+
+    assert intermediates(seen["trust"]) == {"Test Intermediate CA", "Test Intermediate CA B"}
+    assert intermediates(h.wait_calls[0]["context"]) == {"Test Intermediate CA B"}
+    assert h.usable_checked == ("kvm.test", "kvm.test")

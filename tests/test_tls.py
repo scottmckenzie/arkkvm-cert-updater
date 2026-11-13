@@ -265,3 +265,27 @@ def test_verified_session_rejects_untrusted(old_cert, verified_context):
 def test_trust_rejects_pins_that_are_not_sha256(verified_context, length):
     with pytest.raises(ValueError, match="SHA-256"):
         Trust(verified_context, b"\x01" * length)
+
+
+def test_renewal_under_a_new_intermediate_still_verifies_the_served_certificate(pki, root_file, tmp_path):
+    """Let's Encrypt rotates intermediates. The KVM serves only its leaf, issued under intermediate A, while the
+    renewed lineage's chain.pem holds intermediate B: the old certificate must still verify (from certbot's
+    archived chains) or the renewal would stop with an identity error before uploading anything."""
+    from conftest import certbot_lineage, second_intermediate
+
+    from arkkvm_cert_updater.certs import load_lineage
+
+    pki_b = second_intermediate(pki)
+    old_cert, old_key = pki.issue()
+    new_cert, new_key = pki_b.issue()
+    live = certbot_lineage(
+        tmp_path,
+        "kvm.example.com",
+        [(old_cert, old_key, pki.intermediate_pem), (new_cert, new_key, pki_b.intermediate_pem)],
+    )
+    lineage = load_lineage(live)
+    with serve_https(old_cert, old_key) as (_, port):
+        assert not is_verified("localhost", port, verification_context(lineage.chain_pem, root_file), timeout=TIMEOUT)
+        context = verification_context(lineage.issuer_chains_pem, root_file)
+        assert is_verified("localhost", port, context, timeout=TIMEOUT)
+        assert choose_trust("localhost", port, context=context, pin=None, timeout=TIMEOUT).pin is None

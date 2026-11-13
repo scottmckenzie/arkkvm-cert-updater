@@ -185,9 +185,21 @@ def test_unreachable_device_exits_8(env, make_lineage, capsys):
         raise ConnectionRefusedError("connection refused")
 
     deps = Deps(fetch=fetch)
-    assert cli.main([], env, deps=deps) == 8
+    # The test certificate covers localhost, so the pre-install check passes and the KVM is contacted.
+    assert cli.main([], {**env, "ARKKVM_URL": "https://localhost"}, deps=deps) == 8
     err = capsys.readouterr().err
     assert err.startswith("error: ") and "Traceback" not in err
+
+
+def test_certificate_not_covering_host_exits_3_before_contacting_device(env, make_lineage, capsys):
+    make_lineage("kvm.test")  # issued for localhost / 127.0.0.1 only
+
+    def fetch(*args, **kwargs):
+        raise AssertionError("the KVM must not be contacted")
+
+    assert cli.main(["--check"], env, deps=Deps(fetch=fetch)) == 3
+    err = capsys.readouterr().err
+    assert "does not cover kvm.test" in err and "ARKKVM_URL" in err
 
 
 def test_no_password_option_rejected():
