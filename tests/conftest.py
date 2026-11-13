@@ -164,10 +164,10 @@ class OldCert:
 
 @pytest.fixture(scope="session")
 def old_cert() -> OldCert:
-    """A self-signed CN=IPMI RSA certificate for localhost, like the KVM's factory one."""
+    """A self-signed CN=ArkKVM self-signed RSA certificate for localhost, like the KVM's factory one."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = (
-        _builder("IPMI", "IPMI", key.public_key())
+        _builder("ArkKVM self-signed", "ArkKVM self-signed", key.public_key())
         .add_extension(
             x509.SubjectAlternativeName([x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
             critical=False,
