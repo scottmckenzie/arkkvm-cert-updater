@@ -1,7 +1,12 @@
 [project]
 name = "arkkvm-cert-updater"
 version = "0.1.0"
-requires-python = ">=3.14"
+description = "Install Let's Encrypt certificates on ArkKVM devices, with a certbot deploy hook"
+readme = "README.md"
+authors = [
+    { name = "Scott McKenzie", email = "scott@noizyland.net" }
+]
+requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.14.5",
     "aiortc>=1.15.0",
@@ -9,17 +14,40 @@ dependencies = [
 ]
 
 [project.scripts]
-arkkvm_update_cert = "arkkvm_update_cert:main"
+arkkvm-cert-updater = "arkkvm_cert_updater.cli:main_exit"
 
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = ["arkkvm_update_cert"]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
+    "coverage>=7.17.2",
+    "pyrefly>=1.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]  # the formatter manages line length; long strings are left alone
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]  # temporary: keeps the old arkkvm_update_cert.py importable; removed in Task 7
+
+[tool.coverage.run]
+source = ["arkkvm_cert_updater"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+search-path = ["src", "tests"]
