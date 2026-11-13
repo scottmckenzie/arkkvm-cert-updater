@@ -64,7 +64,7 @@
 ```python
 @dataclass(frozen=True)
 class Config:
-    url: str            # normalised: "https://host[:port]", no trailing slash
+    url: str  # normalised: "https://host[:port]", no trailing slash
     host: str
     port: int
     password: str
@@ -107,8 +107,8 @@ def test_unresolved_pass_reference_not_echoed():
 class Lineage:
     name: str
     leaf_der: bytes
-    certs_pem: str      # every CERTIFICATE block of fullchain.pem, joined with "\n", trailing "\n"
-    key_pem: str        # privkey.pem stripped, trailing "\n"
+    certs_pem: str  # every CERTIFICATE block of fullchain.pem, joined with "\n", trailing "\n"
+    key_pem: str  # privkey.pem stripped, trailing "\n"
     chain_pem: bytes
     fingerprint: bytes  # sha256 of leaf_der
 ```
