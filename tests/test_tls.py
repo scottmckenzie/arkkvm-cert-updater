@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import gc
 import hashlib
 import ipaddress
 import socket
@@ -230,6 +231,11 @@ def test_pinned_session_accepts_matching_cert(old_cert, verified_context):
         assert asyncio.run(_get(f"https://localhost:{port}/", aiohttp_ssl(trust))) == "ok"
 
 
+# On a fingerprint mismatch aiohttp closes the TLS transport, but the TLS shutdown finishes asynchronously
+# (it waits on the test server's thread), so asyncio.run() can end with the socket still open. That's harmless
+# (the real tool exits right after, with exit 4), but under -W error the warning would surface in whichever
+# later test happens to garbage-collect it. Collect it here and ignore only that.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 def test_pinned_session_rejects_other_cert(old_cert, verified_context):
     trust = Trust(verified_context, sha256_fingerprint(old_cert.der))
     other_pem, other_key = _self_signed_localhost()
@@ -242,6 +248,7 @@ def test_pinned_session_rejects_other_cert(old_cert, verified_context):
         # next address after the mismatch and reports its connection error instead. Pinning ignores the name.
         asyncio.run(_get(f"https://127.0.0.1:{port}/", aiohttp_ssl(trust)))
     assert handler.received == []  # rejected before any request bytes were sent
+    gc.collect()
 
 
 def test_verified_session_uses_our_context(pki, verified_context):
@@ -289,3 +296,19 @@ def test_renewal_under_a_new_intermediate_still_verifies_the_served_certificate(
         context = verification_context(lineage.issuer_chains_pem, root_file)
         assert is_verified("localhost", port, context, timeout=TIMEOUT)
         assert choose_trust("localhost", port, context=context, pin=None, timeout=TIMEOUT).pin is None
+
+
+def test_root_in_chain_file_is_not_trusted(pki, unrelated_ca_file):
+    """Some CAs put their root in the chain file. It must not become a trust anchor that the configured CAs
+    (here an unrelated bundle) don't include; only the intermediates in a chain file may help."""
+    cert_pem, key_pem = pki.issue()
+    with serve_https(cert_pem, key_pem) as (_, port):
+        context = verification_context(pki.intermediate_pem + pki.root_pem, unrelated_ca_file)
+        assert not is_verified("localhost", port, context, timeout=TIMEOUT)
+
+
+def test_root_in_chain_file_does_not_stop_the_intermediate_helping(pki, root_file):
+    cert_pem, key_pem = pki.issue()
+    with serve_https(cert_pem, key_pem) as (_, port):
+        context = verification_context(pki.intermediate_pem + pki.root_pem, root_file)
+        assert is_verified("localhost", port, context, timeout=TIMEOUT)

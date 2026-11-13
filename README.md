@@ -49,7 +49,7 @@ install -m 600 certbot/config.env.example ~/.config/arkkvm-cert-updater/config.e
 $EDITOR ~/.config/arkkvm-cert-updater/config.env
 ```
 
-The tool warns if the group or others have any access to the file (mode `go+rwx`, so use `600`), or if someone other than you or root owns it. Use absolute paths in it: `~` and `$HOME` are not expanded. The format is `KEY=VALUE`, with optional `export`, quotes and `#` comments. The real environment overrides the file.
+The tool warns if the group or others have any access to the file (mode `go+rwx`, so use `600`), or if someone other than you or root owns it. With Proton Pass, the deploy hook gives these warnings for `config.env` and the token file itself, since the updater then only sees a private copy. Use absolute paths in it: `~` and `$HOME` are not expanded. The format is `KEY=VALUE`, with optional `export`, quotes and `#` comments. The real environment overrides the file.
 
 | Setting | Meaning | Default |
 |---|---|---|

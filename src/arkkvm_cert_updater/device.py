@@ -68,6 +68,7 @@ async def _refuse_redirect(
     redirect to another host with a valid certificate would hand it the CSRF token and the WebRTC session
     (and so the private key)."""
     location = params.response.headers.get("Location", "").split("?", 1)[0]  # may be relative
+    params.response.close()  # aiohttp abandons the redirect response when this raises; don't leak its socket
     raise ProtocolError(f"the KVM redirected {params.url.with_query(None)} to {location or '?'}; refusing")
 
 

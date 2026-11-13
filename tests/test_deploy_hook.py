@@ -409,3 +409,62 @@ def test_empty_cert_name_in_environment_overrides_config(hook_env):
     assert result.returncode != 0
     assert "ARKKVM_CERT_NAME is not set" in result.stderr
     assert calls == []
+
+
+# The updater only sees the hook's private, token-free copy of config.env, so the hook
+# itself must warn about the original files that hold the Proton Pass token.
+
+
+def _pp_config(hook_env, mode: int) -> Path:
+    path = Path(hook_env["ARKKVM_CERT_UPDATER_ENV"])
+    path.write_text("ARKKVM_CERT_NAME=kvm.example.com\nPROTON_PASS_PERSONAL_ACCESS_TOKEN=pst_cfg::KEY\n")
+    path.chmod(mode)
+    return path
+
+
+def test_hook_warns_about_readable_original_config(hook_env):
+    path = _pp_config(hook_env, 0o644)
+    result, calls = run_hook(hook_env)
+    assert result.returncode == 0, result.stderr
+    assert f"arkkvm-deploy-hook: warning: {path} is accessible by other users" in result.stderr
+    assert f"chmod 600 {path}" in result.stderr
+    assert "pst_cfg" not in result.stderr
+    assert [c["prog"] for c in calls][-1] == "pass-cli"  # still runs: a warning, not an error
+
+
+def test_hook_quiet_about_private_original_config(hook_env):
+    _pp_config(hook_env, 0o600)
+    result, _ = run_hook(hook_env)
+    assert result.returncode == 0, result.stderr
+    assert "warning" not in result.stderr
+
+
+def test_hook_warns_about_readable_token_file(hook_env, tmp_path):
+    config_path = _pp_config(hook_env, 0o600)
+    config_path.write_text("ARKKVM_CERT_NAME=kvm.example.com\n")
+    token = tmp_path / "token"
+    token.chmod(0o640)
+    result, _ = run_hook({**hook_env, "ARKKVM_PASS_TOKEN_FILE": str(token)})
+    assert result.returncode == 0, result.stderr
+    assert f"{token} is accessible by other users" in result.stderr
+    assert str(config_path) not in result.stderr
+
+
+def test_hook_warns_about_original_config_owned_by_someone_else(hook_env, tmp_path):
+    _pp_config(hook_env, 0o600)
+    fake_id = Path(hook_env["PATH"].split(":")[0]) / "id"
+    fake_id.write_text("#!/bin/sh\necho 4242\n")  # pretend we are uid 4242, so the file is someone else's
+    fake_id.chmod(0o755)
+    result, _ = run_hook(hook_env)
+    assert result.returncode == 0, result.stderr
+    assert "is owned by another user" in result.stderr
+
+
+def test_hook_leaves_permission_warnings_to_the_updater_without_proton_pass(hook_env):
+    path = Path(hook_env["ARKKVM_CERT_UPDATER_ENV"])
+    path.write_text("ARKKVM_CERT_NAME=kvm.example.com\n")
+    path.chmod(0o644)
+    result, calls = run_hook(hook_env)
+    assert result.returncode == 0, result.stderr
+    assert [c["prog"] for c in calls] == ["updater"]
+    assert "warning" not in result.stderr  # the updater reads this very file and warns itself

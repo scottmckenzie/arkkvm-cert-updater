@@ -42,6 +42,21 @@ die() {
     exit 1
 }
 
+# check_private FILE: warn, as the updater does for its env file, if FILE (which may
+# hold secrets) is accessible by other users or owned by someone else.
+check_private() {
+    [ -e "$1" ] || return 0
+    _ls=$(ls -ldn -- "$1") || return 0
+    case ${_ls%% *} in
+        ????------*) ;;
+        *) echo "arkkvm-deploy-hook: warning: $1 is accessible by other users (${_ls%% *}) but may contain secrets; run: chmod 600 $1" >&2 ;;
+    esac
+    _owner=$(printf '%s\n' "$_ls" | awk '{print $3}')
+    if [ "$_owner" != "$(id -u)" ] && [ "$_owner" != 0 ]; then
+        echo "arkkvm-deploy-hook: warning: $1 is owned by another user (uid $_owner); they can change its settings" >&2
+    fi
+}
+
 if [ -n "${ARKKVM_CERT_UPDATER_ENV:-}" ]; then
     ENV_FILE=$ARKKVM_CERT_UPDATER_ENV
 elif [ -f "$USER_CONFIG/arkkvm-cert-updater/config.env" ]; then
@@ -125,8 +140,12 @@ fi
 PASS_CLI=$(find_program pass-cli "$(conf_get ARKKVM_PASS_CLI)")
 [ -n "$PASS_CLI" ] || die "pass-cli not found; set ARKKVM_PASS_CLI"
 
+# The updater only ever sees the private, token-free copy made below, so it can't
+# warn about the files that hold the token; check them here.
+check_private "$ENV_FILE"
 if [ -z "$PAT" ]; then
     [ -r "$TOKEN_FILE" ] || die "cannot read Proton Pass token file $TOKEN_FILE"
+    check_private "$TOKEN_FILE"
     PAT=$(tr -d '[:space:]' <"$TOKEN_FILE")
     # Accept the line exactly as `pass-cli agent create` prints it.
     PAT=${PAT#PROTON_PASS_PERSONAL_ACCESS_TOKEN=}

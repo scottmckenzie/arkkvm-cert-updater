@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 from .certs import format_fingerprint, sha256_fingerprint
 
@@ -50,6 +52,23 @@ def fetch_served_certificate(host: str, port: int, *, timeout: float) -> bytes:
     return der
 
 
+def _intermediates_only(chain_pem: bytes) -> str:
+    """The certificates in ``chain_pem`` that are not self-signed, as PEM.
+
+    Everything ``load_verify_locations`` adds goes into the trust store, and with partial chains off a
+    self-signed certificate there is a trust anchor in its own right. So a root that happens to be in a
+    chain file (some CAs include theirs) would be trusted even if it is not among the system CAs or in
+    the configured CA bundle. Keep only what can help build a chain.
+    """
+    if not chain_pem.strip():
+        return ""
+    return "".join(
+        cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+        for cert in x509.load_pem_x509_certificates(chain_pem)
+        if cert.subject != cert.issuer
+    )
+
+
 def verification_context(chain_pem: bytes, ca_bundle: Path | None) -> ssl.SSLContext:
     """A strict client context: system CAs (or ``ca_bundle``) as roots, ``chain_pem`` as extra intermediates.
 
@@ -58,8 +77,9 @@ def verification_context(chain_pem: bytes, ca_bundle: Path | None) -> ssl.SSLCon
     """
     context = ssl.create_default_context(cafile=ca_bundle)
     context.verify_flags &= ~ssl.VERIFY_X509_PARTIAL_CHAIN
-    if chain_pem.strip():
-        context.load_verify_locations(cadata=chain_pem.decode("ascii"))
+    intermediates = _intermediates_only(chain_pem)
+    if intermediates:
+        context.load_verify_locations(cadata=intermediates)
     context.check_hostname = True
     context.verify_mode = ssl.CERT_REQUIRED
     return context

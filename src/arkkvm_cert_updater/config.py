@@ -122,6 +122,21 @@ def _required(env: Mapping[str, str], name: str) -> str:
     return value
 
 
+def _ascii_host(host: str) -> str:
+    """The host as certificates and TLS name it: internationalized names in their IDNA (``xn--``) form.
+
+    ``urlsplit`` leaves ``https://bücher.example`` as ``bücher.example``, but a certificate's
+    subjectAltName holds ``xn--bcher-kva.example``, and the TLS probes and HTTP client must all use the
+    same name. IP addresses and plain ASCII names are returned unchanged.
+    """
+    if host.isascii() or ":" in host:
+        return host
+    try:
+        return host.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ConfigError(f"ARKKVM_URL host {host!r} is not a valid internationalized domain name: {exc}") from None
+
+
 def _parse_url(value: str) -> tuple[str, str, int]:
     try:
         parts = urlsplit(value)
@@ -133,6 +148,7 @@ def _parse_url(value: str) -> tuple[str, str, int]:
         raise ConfigError("ARKKVM_URL must start with https://")
     if not host:
         raise ConfigError("ARKKVM_URL has no host name")
+    host = _ascii_host(host)
     if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username or parts.password:
         raise ConfigError("ARKKVM_URL must be just https://host[:port], without a path or credentials")
     if port == 0:

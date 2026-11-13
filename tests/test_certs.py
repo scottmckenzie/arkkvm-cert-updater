@@ -289,3 +289,16 @@ def test_check_usable_for_dates(pki, tmp_path):
         check_usable_for(lineage, "kvm.example.com", now=dt.datetime(2026, 5, 1, tzinfo=dt.UTC))
     with pytest.raises(CertificateError, match="not valid until"):
         check_usable_for(lineage, "kvm.example.com", now=dt.datetime(2025, 12, 1, tzinfo=dt.UTC))
+
+
+def test_check_usable_for_internationalized_host_from_config(pki, tmp_path):
+    """End to end with the config: a Unicode URL host matches a certificate issued for its IDNA form."""
+    from cryptography import x509
+
+    from arkkvm_cert_updater.certs import check_usable_for
+    from arkkvm_cert_updater.config import _parse_url
+
+    lineage = _lineage_for(pki, tmp_path, "xn--bcher-kva.example", sans=[x509.DNSName("xn--bcher-kva.example")])
+    parsed = _parse_url("https://bücher.example")
+    host = parsed[1] if len(parsed) == 3 else parsed[0]
+    check_usable_for(lineage, host)

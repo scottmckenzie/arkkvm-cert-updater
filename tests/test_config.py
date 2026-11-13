@@ -262,3 +262,16 @@ def test_blank_password_rejected(blank):
 def test_unresolved_pass_reference_with_spaces_rejected():
     with pytest.raises(ConfigError, match="unresolved Proton Pass reference"):
         resolve_config({**BASE, "ARKKVM_PASSWORD": "  pass://Vault/Item/password "})
+
+
+def test_internationalized_host_uses_idna_form():
+    cfg = resolve_config({**BASE, "ARKKVM_URL": "https://BÜCHER.example:8443"})
+    # Certificates name it this way, so the pre-install check and TLS probes must too.
+    assert cfg.host == "xn--bcher-kva.example"
+    assert cfg.url == "https://xn--bcher-kva.example:8443"
+    assert cfg.port == 8443
+
+
+def test_invalid_internationalized_host_rejected():
+    with pytest.raises(ConfigError, match=r"ARKKVM_URL host .* is not a valid internationalized domain name"):
+        resolve_config({**BASE, "ARKKVM_URL": "https://\u00ad.example"})
