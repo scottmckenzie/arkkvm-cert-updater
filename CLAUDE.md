@@ -1,31 +1,86 @@
 # arkkvm-cert-updater
 
-Single-file CLI that sets an ArkKVM device's TLS mode or custom certificate through
-the device's own web API (local login → WebRTC → `setTLSState` over the `rpc` data channel).
-It is mainly run as a certbot deploy hook.
+## Manage packages
+
+This project uses uv. Do not use pip, pip-tools, poetry, or conda.
+
+- Add runtime dependency: `uv add <package>` (writes to `[project.dependencies]`)
+- Add dev dependency: `uv add --dev <package>` (writes to `[dependency-groups]` per PEP 735)
+- Remove dependency: `uv remove <package>`
+- Sync environment from lockfile: `uv sync`
+- Regenerate lockfile from constraints: `uv lock`
+- Upgrade locked versions: `uv lock --upgrade`
+- Commit `uv.lock` to version control (current uv guidance is to commit it for applications, CLIs, and libraries)
+
+## Run code
+
+Always use `uv run` to execute Python code and tools. Never call `python`, `pytest`, `ruff`, or other tools directly. They may not resolve to the project's virtual environment.
+
+- Run a script: `uv run python script.py`
+- Run a module: `uv run python -m module_name`
+- Run a tool: `uv run pytest`, `uv run ruff check .`
+- One-off tool (not a project dependency): `uvx <tool>`
+
+## Test code
+
+- Framework: pytest
+- Run tests: `uv run pytest`
+- Test files go in `tests/` at the project root
+- Test file naming: `test_*.py`
+- Test function naming: `test_*`
+- No `__init__.py` needed in `tests/`
+- Coverage: `uv add --dev coverage`, then `uv run coverage run -m pytest` and `uv run coverage report`
+
+## Lint and format code
+
+- Tool: ruff (handles both linting and formatting)
+- Lint: `uv run ruff check .`
+- Lint and auto-fix: `uv run ruff check --fix .`
+- Format: `uv run ruff format .`
+- Check formatting: `uv run ruff format --check .`
+- Configuration lives in `pyproject.toml` under `[tool.ruff]`
+
+## Check types
+
+- Tool: pyrefly (preferred), ty, or mypy
+- Run: `uv run pyrefly check`, `uv run ty check`, or `uv run mypy .`
+- Configuration lives in `pyproject.toml` under `[tool.pyrefly]`, `[tool.ty]`, or `[tool.mypy]`
+
+## Avoid these practices
+
+- Do not create or activate virtual environments manually. uv manages `.venv/` automatically.
+- Do not install packages globally or with `pip install`.
+- Do not create `requirements.txt` for dependency management. Use `pyproject.toml` and `uv.lock`.
+- Do not run `python setup.py` commands.
+- Do not add dependencies to pyproject.toml by hand. Use `uv add`.
+- If you must edit pyproject.toml directly, write dev dependencies under `[dependency-groups]` (PEP 735), not the legacy `[tool.uv.dev-dependencies]` table.
 
 ## Layout
-- `arkkvm_update_cert.py`: all of the code; the entry point is `main()` (arkkvm_update_cert.py:289)
-- `certbot-deploy-hook.sh`: certbot hook; reads `ARKKVM_PASSWORD` from `~/.letsencrypt/arkkvm.env`
-- `pyproject.toml`: packaging (setuptools, `py-modules`) plus the `arkkvm_update_cert` command
-- `tests/`: pytest suite; WebRTC, HTTP and the device are faked (see `tests/test_update_device.py`)
+
+CLI that installs a Let's Encrypt certificate on an ArkKVM device through the device's own web API
+(local login, WebRTC, `setTLSState` over the `rpc` data channel), then reboots it. Mainly run as a certbot deploy hook.
+
+- `src/arkkvm_cert_updater/`: the package (`cli.py` entry point `main_exit`, `config.py`, `certs.py`, `tls.py`, `device.py`, `updater.py`)
+- `certbot/arkkvm-deploy-hook.sh`: certbot deploy hook (Proton Pass, `--reapply`); `certbot/config.env.example`: settings example
+- `tests/`: pytest suite; the device, WebRTC and HTTP are faked, hook tests use fake programs
+- `pyproject.toml`: packaging (`uv_build`) and the `arkkvm-cert-updater` command
 
 ## Commands
-- Dev env: `uv sync` (puts the command in `.venv/bin/`)
-- Tests: `uv run pytest --cov=arkkvm_update_cert --cov-report=term-missing`
-- Smoke check: `uv run arkkvm_update_cert --help`
-- After editing `pyproject.toml`: `uv lock && uv sync`, and commit `uv.lock`
+- Dev env: `uv sync`
+- Tests with coverage: `uv run coverage run -m pytest && uv run coverage report`
+- Smoke check: `uv run arkkvm-cert-updater --help`
+- ShellCheck: `uvx --from shellcheck-py==0.11.0.1 shellcheck certbot/*.sh`
 - End-user install: `uv tool install .` (into `~/.local/bin`)
 
 ## Gotchas
-- The tests never touch a real device. Exercising the script for real needs one, and
-  `--reboot` or `--mode disabled` can lock you out. Never run it against a device
-  unless the user asks.
-- The command name (`arkkvm_update_cert`) differs from the project name
-  (`arkkvm-cert-updater`). The module must stay listed in `[tool.setuptools] py-modules`.
-- The hook calls `$HOME/.local/bin/arkkvm_update_cert` by absolute path, because certbot
-  runs with a minimal PATH. Keep it that way.
-- The README covers usage. Keep its examples in sync when CLI flags change.
+- The tests never touch a real device. Never run the updater against a device unless the user asks: every
+  install reboots the KVM.
+- The hook is `certbot/arkkvm-deploy-hook.sh`. certbot runs with a minimal `PATH`, so the hook finds the
+  updater in `~/.local/bin` itself; keep it that way.
+- The password has no command-line option, and the updater refuses an unresolved `pass://` value; only the
+  hook resolves Proton Pass references.
+- certbot's config dir is `~/.config/letsencrypt`. Root is not supported.
+- The README covers usage. Keep it in sync when CLI options or settings change.
 
 ## Development Standards
 
