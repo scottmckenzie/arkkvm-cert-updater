@@ -14,7 +14,7 @@ from arkkvm_cert_updater.config import (
     resolve_config,
 )
 
-FINGERPRINT = "8A:62:8D:8E:28:7A:B6:3D:08:6A:30:DE:0F:91:D9:BF:7B:53:30:47:B4:49:1E:79:11:D4:1C:5C:C2:C8:1B:C5"
+FINGERPRINT = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
 BASE = {
     "ARKKVM_URL": "https://kvm.example.com",
     "ARKKVM_PASSWORD": "pw",

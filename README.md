@@ -129,10 +129,10 @@ renew_hook = /home/<user>/.local/bin/arkkvm-deploy-hook
 A fresh device serves plain HTTP only; HTTPS is off until a certificate is enabled. A device that already serves a verifying certificate over HTTPS needs no pin: skip to step 3. The certificate must already be issued, as `--check` and `--reapply` read it from `ARKKVM_LETSENCRYPT_LIVE/ARKKVM_CERT_NAME`.
 
 1. In the ArkKVM web UI, enable the self-signed TLS certificate and reboot the device.
-2. In a browser, open the device and read the certificate's SHA-256 fingerprint in the certificate viewer. Set `ARKKVM_TLS_FINGERPRINT` in `config.env` (use the one your browser shows):
+2. In a browser, open the device and read the certificate's SHA-256 fingerprint in the certificate viewer. Set `ARKKVM_TLS_FINGERPRINT` in `config.env` (this is a placeholder: use the one your browser shows):
 
    ```sh
-   ARKKVM_TLS_FINGERPRINT=8A:62:8D:8E:28:7A:B6:3D:08:6A:30:DE:0F:91:D9:BF:7B:53:30:47:B4:49:1E:79:11:D4:1C:5C:C2:C8:1B:C5
+   ARKKVM_TLS_FINGERPRINT=AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99
    ```
 
 3. Check the settings and the login first, which changes nothing, then install:
