@@ -391,3 +391,21 @@ def test_reapply_missing_dir_suggests_setting(hook_env):
     config(hook_env, "ARKKVM_CERT_NAME=nothing-here\n")
     result, _ = run_hook(hook_env, "--reapply")
     assert result.returncode == 1 and "ARKKVM_LETSENCRYPT_LIVE" in result.stderr
+
+
+def test_empty_token_in_environment_overrides_config(hook_env):
+    # An explicitly empty variable in the environment wins over config.env, as it does for the updater:
+    # here it turns Proton Pass off for one run, using a plaintext password from the environment.
+    config(hook_env, "ARKKVM_PASSWORD=pass://Infra/Item/password\nPROTON_PASS_PERSONAL_ACCESS_TOKEN=pst_cfg::KEY\n")
+    env = {**hook_env, "PROTON_PASS_PERSONAL_ACCESS_TOKEN": "", "ARKKVM_PASSWORD": "plain"}
+    result, calls = run_hook(env)
+    assert result.returncode == 0, result.stderr
+    assert [c["prog"] for c in calls] == ["updater"]
+
+
+def test_empty_cert_name_in_environment_overrides_config(hook_env):
+    config(hook_env, "")  # config.env sets the certificate name
+    result, calls = run_hook({**hook_env, "ARKKVM_CERT_NAME": ""})
+    assert result.returncode != 0
+    assert "ARKKVM_CERT_NAME is not set" in result.stderr
+    assert calls == []

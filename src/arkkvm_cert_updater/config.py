@@ -167,8 +167,11 @@ def resolve_config(env: Mapping[str, str]) -> Config:
     """Validate the settings in ``env`` and build a :class:`Config`; errors name the setting."""
     url = _required(env, "ARKKVM_URL")
     url, host, port = _parse_url(url)
-    password = _required(env, "ARKKVM_PASSWORD")
-    if password.startswith("pass://"):
+    # Verbatim: leading or trailing spaces can be part of a password. Only reject a blank one.
+    password = env.get("ARKKVM_PASSWORD", "")
+    if not password.strip():
+        raise ConfigError("ARKKVM_PASSWORD is required")
+    if password.strip().startswith("pass://"):
         # Never echo the value: it names where the secret lives.
         raise ConfigError(
             "ARKKVM_PASSWORD is an unresolved Proton Pass reference (pass://...); run through the certbot deploy "

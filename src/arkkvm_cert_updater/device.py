@@ -56,7 +56,25 @@ def _network_errors() -> Iterator[None]:
         raise
     except (aiohttp.ClientError, OSError, TimeoutError) as exc:
         text = _strip_queries(str(exc))
-        raise ProtocolError(f"{type(exc).__name__}: {text}" if text else type(exc).__name__) from exc
+        # from None: the original exception's text can carry the signalling URL's CSRF token, and -v prints
+        # the whole traceback, chained causes included.
+        raise ProtocolError(f"{type(exc).__name__}: {text}" if text else type(exc).__name__) from None
+
+
+async def _refuse_redirect(
+    session: aiohttp.ClientSession, ctx: object, params: aiohttp.TraceRequestRedirectParams
+) -> None:
+    """Never follow a redirect. aiohttp's ``ws_connect`` follows them and has no option to stop it, and a
+    redirect to another host with a valid certificate would hand it the CSRF token and the WebRTC session
+    (and so the private key)."""
+    location = params.response.headers.get("Location", "").split("?", 1)[0]  # may be relative
+    raise ProtocolError(f"the KVM redirected {params.url.with_query(None)} to {location or '?'}; refusing")
+
+
+def _redirect_guard() -> aiohttp.TraceConfig:
+    trace = aiohttp.TraceConfig()
+    trace.on_request_redirect.append(_refuse_redirect)
+    return trace
 
 
 async def wait_for_ice_gathering(pc: RTCPeerConnection, timeout: float) -> None:
@@ -233,6 +251,7 @@ async def _logged_in_session(
         cookie_jar=aiohttp.CookieJar(unsafe=True),
         timeout=aiohttp.ClientTimeout(total=timeout),
         headers=headers,
+        trace_configs=[_redirect_guard()],
     ) as session:
         yield session, await login(session, base_url, password)
 

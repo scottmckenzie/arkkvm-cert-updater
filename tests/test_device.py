@@ -702,3 +702,57 @@ def test_network_error_message_strips_url_query():
 
 def test_device_logger_is_package_child():
     assert m.LOG.name == "arkkvm_cert_updater.device"
+
+
+def test_network_error_traceback_has_no_csrf_token():
+    import traceback
+
+    with pytest.raises(m.ProtocolError) as exc, m._network_errors():
+        raise aiohttp.ClientError("bad handshake wss://dev/webrtc/signaling/client?csrf-token=SECRET123 failed")
+    # -v prints the full traceback, so the unsanitised original must not be chained onto it.
+    assert "SECRET123" not in "".join(traceback.format_exception(exc.value))
+
+
+def test_session_refuses_redirects_including_websocket_handshake():
+    """A real local server: login works, then the signalling handshake is redirected to another path.
+
+    aiohttp's ws_connect follows redirects with no way to turn it off, so the session-level guard must stop
+    it before the redirect target is ever requested.
+    """
+    from aiohttp import web
+
+    hits: list[str] = []
+
+    async def login(request: web.Request) -> web.Response:
+        return web.json_response({"csrfToken": "SECRET123"})
+
+    async def signalling(request: web.Request) -> web.Response:
+        raise web.HTTPFound(f"/elsewhere?csrf-token={request.query.get('csrf-token', '')}")
+
+    async def elsewhere(request: web.Request) -> web.Response:
+        hits.append(request.path_qs)
+        return web.Response(text="should never be reached")
+
+    async def run() -> None:
+        app = web.Application()
+        app.router.add_post("/auth/login-local", login)
+        app.router.add_get("/webrtc/signaling/client", signalling)
+        app.router.add_get("/elsewhere", elsewhere)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        base = f"http://127.0.0.1:{port}"
+        try:
+            with m._network_errors():
+                async with m._logged_in_session(base, "pw", trust=TRUST, timeout=5) as (session, csrf):
+                    assert csrf == "SECRET123"
+                    await session.ws_connect(f"{base}/webrtc/signaling/client?csrf-token={csrf}")
+        finally:
+            await runner.cleanup()
+
+    with pytest.raises(m.ProtocolError, match="refusing") as exc:
+        asyncio.run(run())
+    assert hits == []
+    assert "SECRET123" not in str(exc.value)

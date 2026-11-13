@@ -243,3 +243,22 @@ def test_url_normalised_from_host_and_port(raw, expected):
 def test_url_port_zero_rejected():
     with pytest.raises(ConfigError, match="ARKKVM_URL"):
         resolve_config({**BASE, "ARKKVM_URL": "https://kvm:0"})
+
+
+def test_password_whitespace_kept_verbatim(tmp_path: Path):
+    path = tmp_path / "c.env"
+    path.write_text('ARKKVM_PASSWORD=" secret "\n')
+    assert resolve_config({**BASE, **parse_env_file(path)}).password == " secret "
+    # Values from the environment (e.g. resolved by `pass-cli run`) are used as given, too.
+    assert resolve_config({**BASE, "ARKKVM_PASSWORD": "\tsecret "}).password == "\tsecret "
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_blank_password_rejected(blank):
+    with pytest.raises(ConfigError, match="ARKKVM_PASSWORD is required"):
+        resolve_config({**BASE, "ARKKVM_PASSWORD": blank})
+
+
+def test_unresolved_pass_reference_with_spaces_rejected():
+    with pytest.raises(ConfigError, match="unresolved Proton Pass reference"):
+        resolve_config({**BASE, "ARKKVM_PASSWORD": "  pass://Vault/Item/password "})

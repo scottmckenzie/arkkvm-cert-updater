@@ -50,12 +50,18 @@ else
     die "no config.env found; set ARKKVM_CERT_UPDATER_ENV or create $USER_CONFIG/arkkvm-cert-updater/config.env"
 fi
 
-# conf_get KEY: the value of KEY from the environment, else from the env file.
-# Understands the same format as the updater: KEY=VALUE, optional "export ",
+# conf_get KEY: the value of KEY from the environment if it is set there (even to an
+# empty value, which overrides the file, as it does for the updater), else from the
+# env file. Understands the same format as the updater: KEY=VALUE, optional "export ",
 # optional single or double quotes, # comments. The last assignment wins.
 conf_get() {
-    eval "_v=\${$1:-}"
-    if [ -z "$_v" ] && [ -r "$ENV_FILE" ]; then
+    if eval "[ \"\${$1+set}\" = set ]"; then
+        eval "_v=\${$1}"
+        printf '%s' "$_v"
+        return
+    fi
+    _v=
+    if [ -r "$ENV_FILE" ]; then
         _v=$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$1[[:space:]]*=[[:space:]]*\(.*[^[:space:]]\)\{0,1\}[[:space:]]*\$/\2/p" "$ENV_FILE" | tail -n 1)
         case $_v in
             \"*\") _v=${_v#\"}; _v=${_v%\"} ;;
