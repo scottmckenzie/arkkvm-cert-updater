@@ -38,7 +38,6 @@ ignore = ["E501"]  # the formatter manages line length; long strings are left al
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]  # temporary: keeps the old arkkvm_update_cert.py importable; removed in Task 7
 
 [tool.coverage.run]
 source = ["arkkvm_cert_updater"]
