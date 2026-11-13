@@ -264,7 +264,7 @@ def test_verified_session_rejects_untrusted(old_cert, verified_context):
         serve_https(old_cert.cert_pem, old_cert.key_pem, handler=handler) as (_, port),
         pytest.raises(aiohttp.ClientConnectorCertificateError),
     ):
-        asyncio.run(_get(f"https://localhost:{port}/", aiohttp_ssl(Trust(verified_context, None))))
+        asyncio.run(_get(f"https://127.0.0.1:{port}/", aiohttp_ssl(Trust(verified_context, None))))
     assert handler.received == []
 
 
