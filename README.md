@@ -201,7 +201,7 @@ On each run, the hook logs in with the token, runs the updater under `pass-cli r
 | 1 | the hook couldn't start the updater (missing `config.env`, updater or `pass-cli`, or `pass-cli login` failed, e.g. an expired token), or an unexpected error |
 | 2 | configuration error (including an unresolved `pass://` password) |
 | 3 | certificate (lineage) error: unreadable, key mismatch |
-| 4 | device identity failure (TLS verification and pin both failed) |
+| 4 | device identity failure (TLS verification and pin both failed), before connecting or on the connection itself; nothing was sent |
 | 5 | login failed (401/403 from the local login) |
 | 6 | refused: the device rejected the certificate, or reported a different TLS state afterwards; the old certificate stays and no reboot happens |
 | 7 | verification after the reboot failed or timed out |

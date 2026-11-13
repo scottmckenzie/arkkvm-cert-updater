@@ -17,7 +17,7 @@ import aiohttp
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.sdp import candidate_from_sdp
 
-from .tls import Trust, aiohttp_ssl
+from .tls import IdentityError, Trust, aiohttp_ssl
 
 LOG = logging.getLogger(__name__)
 
@@ -49,11 +49,21 @@ def _strip_queries(text: str) -> str:
 
 @contextlib.contextmanager
 def _network_errors() -> Iterator[None]:
-    """Report transport failures as ``ProtocolError``; typed device errors pass through."""
+    """Report transport failures as ``ProtocolError``; typed device errors pass through.
+
+    A connection refused because the KVM's certificate fails verification or doesn't match the pin is an
+    identity failure (exit 4), like the same failure caught earlier by ``choose_trust``: it can happen here if
+    the certificate changes in between, or something answers this connection with a different one.
+    """
     try:
         yield
     except DeviceError:
         raise
+    except (aiohttp.ServerFingerprintMismatch, aiohttp.ClientConnectorCertificateError) as exc:
+        raise IdentityError(
+            f"the KVM's certificate no longer passed verification (or the pin) when connecting, so nothing was "
+            f"sent: {type(exc).__name__}: {_strip_queries(str(exc))}"
+        ) from None
     except (aiohttp.ClientError, OSError, TimeoutError) as exc:
         text = _strip_queries(str(exc))
         # from None: the original exception's text can carry the signalling URL's CSRF token, and -v prints

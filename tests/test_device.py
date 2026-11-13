@@ -756,3 +756,46 @@ def test_session_refuses_redirects_including_websocket_handshake():
         asyncio.run(run())
     assert hits == []
     assert "SECRET123" not in str(exc.value)
+
+
+# Identity failures on the connection that carries the password: exit 4, like choose_trust's -------------
+
+
+def _install_against(cert_pem: bytes, key_pem: bytes, trust: Trust) -> None:
+    from tls_server import serve_https
+
+    with serve_https(cert_pem, key_pem) as (_, port):
+        asyncio.run(m.check_login(f"https://localhost:{port}", "pw", trust=trust, timeout=5))
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")  # see test_tls's mismatch test
+def test_pin_mismatch_when_connecting_is_an_identity_error(old_cert, pki):
+    import gc
+
+    from arkkvm_cert_updater.tls import IdentityError
+
+    cert_pem, key_pem = pki.issue()  # not the pinned certificate
+    with pytest.raises(IdentityError, match="ServerFingerprintMismatch"):
+        _install_against(cert_pem, key_pem, Trust(ssl.create_default_context(), sha256(old_cert.der)))
+    gc.collect()
+
+
+def test_failed_verification_when_connecting_is_an_identity_error(old_cert):
+    from arkkvm_cert_updater.tls import IdentityError
+
+    # Verified mode, but the server's certificate is self-signed and not trusted.
+    with pytest.raises(IdentityError, match="ClientConnectorCertificateError"):
+        _install_against(old_cert.cert_pem, old_cert.key_pem, Trust(ssl.create_default_context(), None))
+
+
+def test_identity_error_maps_to_exit_4():
+    from arkkvm_cert_updater import cli
+    from arkkvm_cert_updater.tls import IdentityError
+
+    assert cli._exit_code(IdentityError("x")) == 4
+
+
+def sha256(der: bytes) -> bytes:
+    import hashlib
+
+    return hashlib.sha256(der).digest()
