@@ -238,7 +238,9 @@ def test_pinned_session_rejects_other_cert(old_cert, verified_context):
         serve_https(other_pem, other_key, handler=handler) as (_, port),
         pytest.raises(aiohttp.ServerFingerprintMismatch),
     ):
-        asyncio.run(_get(f"https://localhost:{port}/", aiohttp_ssl(trust)))
+        # 127.0.0.1, not localhost: where localhost also resolves to ::1 (GitHub runners), aiohttp tries the
+        # next address after the mismatch and reports its connection error instead. Pinning ignores the name.
+        asyncio.run(_get(f"https://127.0.0.1:{port}/", aiohttp_ssl(trust)))
     assert handler.received == []  # rejected before any request bytes were sent
 
 
