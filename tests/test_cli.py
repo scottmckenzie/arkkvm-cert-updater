@@ -184,7 +184,7 @@ def test_unreachable_device_exits_8(env, make_lineage, capsys):
     def fetch(*args, **kwargs):
         raise ConnectionRefusedError("connection refused")
 
-    deps = Deps(fetch=fetch)
+    deps = Deps(served=fetch)
     # The test certificate covers localhost, so the pre-install check passes and the KVM is contacted.
     assert cli.main([], {**env, "ARKKVM_URL": "https://localhost"}, deps=deps) == 8
     err = capsys.readouterr().err
@@ -197,7 +197,7 @@ def test_certificate_not_covering_host_exits_3_before_contacting_device(env, mak
     def fetch(*args, **kwargs):
         raise AssertionError("the KVM must not be contacted")
 
-    assert cli.main(["--check"], env, deps=Deps(fetch=fetch)) == 3
+    assert cli.main(["--check"], env, deps=Deps(served=fetch)) == 3
     err = capsys.readouterr().err
     assert "does not cover kvm.test" in err and "ARKKVM_URL" in err
 

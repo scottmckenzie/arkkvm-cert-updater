@@ -312,3 +312,51 @@ def test_root_in_chain_file_does_not_stop_the_intermediate_helping(pki, root_fil
     with serve_https(cert_pem, key_pem) as (_, port):
         context = verification_context(pki.intermediate_pem + pki.root_pem, root_file)
         assert is_verified("localhost", port, context, timeout=TIMEOUT)
+
+
+# --- served_certificate: one handshake for fingerprint and verification ---------------------------
+
+
+def test_served_certificate_verified_in_one_handshake(pki, root_file):
+    from arkkvm_cert_updater.tls import served_certificate
+
+    cert_pem, key_pem = pki.issue()
+    with serve_https(cert_pem, key_pem) as (_, port):
+        der, verified = served_certificate(
+            "localhost", port, verification_context(pki.intermediate_pem, root_file), timeout=TIMEOUT
+        )
+    assert verified is True
+    assert der == x509.load_pem_x509_certificate(cert_pem).public_bytes(serialization.Encoding.DER)
+
+
+def test_served_certificate_unverified_still_names_the_certificate(old_cert, verified_context):
+    from arkkvm_cert_updater.tls import served_certificate
+
+    with serve_https(old_cert.cert_pem, old_cert.key_pem) as (_, port):
+        der, verified = served_certificate("localhost", port, verified_context, timeout=TIMEOUT)
+    assert verified is False
+    assert der == old_cert.der
+
+
+def test_served_certificate_wrong_hostname_is_not_verified(pki, root_file):
+    from arkkvm_cert_updater.tls import served_certificate
+
+    cert_pem, key_pem = _make_cert(
+        "other.example", [x509.DNSName("other.example")], "Test Intermediate CA", pki.intermediate_key
+    )
+    with serve_https(cert_pem, key_pem) as (_, port):
+        der, verified = served_certificate(
+            "localhost", port, verification_context(pki.intermediate_pem, root_file), timeout=TIMEOUT
+        )
+    assert verified is False  # a good chain, but not for this name
+    assert der == x509.load_pem_x509_certificate(cert_pem).public_bytes(serialization.Encoding.DER)
+
+
+def test_served_certificate_network_failure_raises():
+    from arkkvm_cert_updater.tls import served_certificate
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]  # bound but not listening: connection refused
+        with pytest.raises(OSError):
+            served_certificate("127.0.0.1", port, ssl.create_default_context(), timeout=TIMEOUT)

@@ -97,6 +97,27 @@ def is_verified(host: str, port: int, context: ssl.SSLContext, *, timeout: float
         return False
 
 
+def served_certificate(host: str, port: int, context: ssl.SSLContext, *, timeout: float) -> tuple[bytes, bool]:
+    """The DER of the leaf the server presents, and whether *that same handshake* passed ``context``.
+
+    One verified handshake answers both questions, so the fingerprint and the verification can't come from
+    two different servers (a proxy or load balancer answering separate connections differently). Only if
+    verification fails is the certificate fetched without verification, and it is then never reported as
+    verified. Nothing is sent either way. Network failures raise ``OSError``.
+    """
+    try:
+        with (
+            socket.create_connection((host, port), timeout=timeout) as sock,
+            context.wrap_socket(sock, server_hostname=host) as tls,
+        ):
+            der = tls.getpeercert(binary_form=True)
+    except ssl.SSLCertVerificationError:
+        return fetch_served_certificate(host, port, timeout=timeout), False
+    if not der:
+        raise ssl.SSLError(f"{host}:{port} presented no certificate")
+    return der, True
+
+
 @dataclass(frozen=True)
 class Trust:
     """How to trust the KVM. A non-``None`` ``pin`` (SHA-256 of the leaf DER) means pinned mode."""

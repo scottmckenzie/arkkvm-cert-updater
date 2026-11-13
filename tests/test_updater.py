@@ -70,6 +70,10 @@ class Harness:
         if name in self.fail:
             raise self.fail[name]
 
+    def served_certificate(self, host, port, context, *, timeout):
+        self.verified_contexts.append(context)
+        return self.fetch(host, port, timeout=timeout), self.is_verified
+
     def fetch(self, host, port, *, timeout):
         return self.served
 
@@ -94,8 +98,7 @@ class Harness:
 
     def deps(self) -> Deps:
         return Deps(
-            fetch=self.fetch,
-            verified=self.verified,
+            served=self.served_certificate,
             choose_trust=self.choose_trust,
             check_login=self.check_login,
             install=self.install,
@@ -226,7 +229,7 @@ def test_fetch_network_failure_propagates_without_login():
         raise ConnectionRefusedError("refused")
 
     deps = h.deps()
-    deps.fetch = refuse
+    deps.served = lambda host, port, context, *, timeout: refuse(host, port, timeout=timeout)
     with pytest.raises(OSError):
         run(make_config(), LINEAGE, deps=deps)
     assert h.calls == []
@@ -273,6 +276,16 @@ def _sequence(items):
     return fetch
 
 
+def _served(fetch, verified):
+    """Adapt the fetch/verify fakes to ``served``: one probe, verification asked only for the new certificate."""
+
+    def served(host, port, context, *, timeout):
+        der = fetch(host, port, timeout=timeout)
+        return der, der == NEW_DER and verified(host, port, context, timeout=timeout)
+
+    return served
+
+
 def _wait(clock: FakeClock, fetch, verified=lambda *a, **k: True, timeout: float = 300.0):
     wait_for_certificate(
         "kvm.test",
@@ -280,8 +293,7 @@ def _wait(clock: FakeClock, fetch, verified=lambda *a, **k: True, timeout: float
         expected=NEW_FP,
         context=ssl.create_default_context(),
         timeout=timeout,
-        fetch=fetch,
-        verified=verified,
+        served=_served(fetch, verified),
         sleep=clock.sleep,
         monotonic=clock.monotonic,
     )

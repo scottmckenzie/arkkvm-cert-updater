@@ -46,8 +46,7 @@ def wait_for_certificate(
     context: ssl.SSLContext,
     timeout: float,
     interval: float = POLL_INTERVAL,
-    fetch: Callable[..., bytes] = tls.fetch_served_certificate,
-    verified: Callable[..., bool] = tls.is_verified,
+    served: Callable[..., tuple[bytes, bool]] = tls.served_certificate,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
@@ -64,11 +63,12 @@ def wait_for_certificate(
     while True:
         probe_timeout = max(0.1, min(PROBE_TIMEOUT, deadline - monotonic()))
         try:
-            fp = sha256_fingerprint(fetch(host, port, timeout=probe_timeout))
+            der, verified = served(host, port, context, timeout=probe_timeout)
+            fp = sha256_fingerprint(der)
             unreachable = False
             last_seen = format_fingerprint(fp)
             if fp == expected:
-                if verified(host, port, context, timeout=probe_timeout):
+                if verified:
                     log.info("the KVM is serving the new certificate %s", last_seen)
                     return
                 last_seen += f" (the new certificate, but it fails verification for {host})"
@@ -106,8 +106,7 @@ class Deps:
     ``check_login`` and ``install`` are synchronous; the defaults run the device coroutines to completion.
     """
 
-    fetch: Callable[..., bytes] = field(default=tls.fetch_served_certificate)
-    verified: Callable[..., bool] = field(default=tls.is_verified)
+    served: Callable[..., tuple[bytes, bool]] = field(default=tls.served_certificate)
     choose_trust: Callable[..., tls.Trust] = field(default=tls.choose_trust)
     check_login: Callable[..., None] = field(default=lambda *a, **k: asyncio.run(device.check_login(*a, **k)))
     install: Callable[..., None] = field(default=lambda *a, **k: asyncio.run(device.install_certificate(*a, **k)))
@@ -117,11 +116,9 @@ class Deps:
 
 def _served_matches(config: Config, lineage: Lineage, check_context: ssl.SSLContext, deps: Deps) -> tuple[bool, str]:
     """Whether the KVM already serves the lineage's certificate, verified; and its fingerprint for logs."""
-    fp = sha256_fingerprint(deps.fetch(config.host, config.port, timeout=PROBE_TIMEOUT))
-    matches = fp == lineage.fingerprint and deps.verified(
-        config.host, config.port, check_context, timeout=PROBE_TIMEOUT
-    )
-    return matches, format_fingerprint(fp)
+    der, verified = deps.served(config.host, config.port, check_context, timeout=PROBE_TIMEOUT)
+    fp = sha256_fingerprint(der)
+    return fp == lineage.fingerprint and verified, format_fingerprint(fp)
 
 
 def run(
