@@ -452,12 +452,14 @@ def test_hook_warns_about_readable_token_file(hook_env, tmp_path):
 
 def test_hook_warns_about_original_config_owned_by_someone_else(hook_env, tmp_path):
     _pp_config(hook_env, 0o600)
-    fake_id = Path(hook_env["PATH"].split(":")[0]) / "id"
-    fake_id.write_text("#!/bin/sh\necho 4242\n")  # pretend we are uid 4242, so the file is someone else's
-    fake_id.chmod(0o755)
+    # Make the file look owned by uid 4242, whoever runs the tests: root-owned files are accepted on purpose,
+    # and CI runners often run as root, so faking the current user instead would not work there.
+    fake_ls = Path(hook_env["PATH"].split(":")[0]) / "ls"
+    fake_ls.write_text("#!/bin/sh\n/bin/ls \"$@\" | awk '{$3 = 4242; print}'\n")
+    fake_ls.chmod(0o755)
     result, _ = run_hook(hook_env)
     assert result.returncode == 0, result.stderr
-    assert "is owned by another user" in result.stderr
+    assert "is owned by another user (uid 4242)" in result.stderr
 
 
 def test_hook_leaves_permission_warnings_to_the_updater_without_proton_pass(hook_env):
