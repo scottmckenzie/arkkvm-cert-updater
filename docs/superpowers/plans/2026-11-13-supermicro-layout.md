@@ -260,4 +260,5 @@ def test_no_password_option(): with pytest.raises(SystemExit): build_parser().pa
 - [ ] **Step 1:** `git push -u forgejo feature/supermicro-layout`.
 - [ ] **Step 2: PR description via llama** from `git log main..` and `git diff --stat main`; must include the spec's **Migration on ddsmash** steps verbatim, plus the safe order: `uv tool install --reinstall` replaces the `arkkvm_update_cert` command, which breaks the old hook, so do steps 2–5 in one sitting. That is safe because certbot renews only ~30 days before expiry and the current cert has ~60 days left, so no renewal can fire mid-switch. End with the session's PR attribution footer.
 - [ ] **Step 3:** Open the PR on Forgejo (`mcp__forgejo__create_pull_request`, base `main`) and wait for CI (`list_workflow_runs`) → green. Do not merge; the owner merges.
-- [ ] **Step 4:** Note for the owner: close GitHub PR #5 after merge; GitHub `main` will lag Forgejo until mirrored.
+- [ ] **Step 4: Open the same PR on GitHub** (owner's request, 2026-11-13): `git push -u origin feature/supermicro-layout`, then `gh pr create --repo scottmckenzie/arkkvm-cert-updater --base main` with the same title and body, `GH_TOKEN` from Proton Pass per the session's procedure. Wait for GitHub CI → green. Do not merge.
+- [ ] **Step 5:** Note for the owner: close GitHub PR #5 after merge.
