@@ -396,12 +396,14 @@ def test_choose_trust_gets_archived_issuer_chains_but_wait_uses_the_new_chain(pk
     run(make_config(), lineage, deps=deps)
 
     def intermediates(context: ssl.SSLContext) -> set[str]:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-
+        # ssl's own view of the store: no re-parsing, since it can include system CAs too, some of them with no
+        # common name or with serial numbers newer versions of cryptography warn about.
         names = {
-            str(x509.load_der_x509_certificate(der).subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value)
-            for der in context.get_ca_certs(binary_form=True)
+            value
+            for cert in context.get_ca_certs()
+            for rdn in cert.get("subject", ())
+            for key, value in rdn
+            if key == "commonName"
         }
         return {n for n in names if n.startswith("Test Intermediate CA")}
 
