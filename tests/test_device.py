@@ -765,7 +765,9 @@ def _install_against(cert_pem: bytes, key_pem: bytes, trust: Trust) -> None:
     from tls_server import serve_https
 
     with serve_https(cert_pem, key_pem) as (_, port):
-        asyncio.run(m.check_login(f"https://localhost:{port}", "pw", trust=trust, timeout=5))
+        # 127.0.0.1, not localhost: where localhost also resolves to ::1 (GitHub runners), aiohttp moves on to the
+        # next address after the identity failure and reports that connection error instead.
+        asyncio.run(m.check_login(f"https://127.0.0.1:{port}", "pw", trust=trust, timeout=5))
 
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")  # see test_tls's mismatch test
